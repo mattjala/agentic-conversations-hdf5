@@ -45,7 +45,7 @@ import matplotlib.ticker as mticker
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from agentic_conversations_hdf5 import HDF5Session, JSONSession, SQLiteSession
+from agentic_conversations_hdf5 import HDF5Session, HDF5PackedSession, HDF5CompoundSession, JSONSession, SQLiteSession
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -103,6 +103,26 @@ BACKENDS = {
         "color": "#17becf",
         "marker": "s",
     },
+    "hdf5_packed": {
+        "label": "HDF5-packed (flush=1)",
+        "color": "#9467bd",
+        "marker": "P",
+    },
+    "hdf5_packed_lazy": {
+        "label": "HDF5-packed (flush=100)",
+        "color": "#c5b0d5",
+        "marker": "X",
+    },
+    "hdf5_compound": {
+        "label": "HDF5-compound (flush=1)",
+        "color": "#2ca02c",
+        "marker": "D",
+    },
+    "hdf5_compound_lazy": {
+        "label": "HDF5-compound (flush=100)",
+        "color": "#98df8a",
+        "marker": "d",
+    },
     "sqlite": {
         "label": "SQLite",
         "color": "#ff7f0e",
@@ -125,6 +145,14 @@ def build_backend(backend: str, store_path: Path, session_id: str):
         return HDF5Session(store_path, session_id=session_id, mode="a", flush_every=1)
     elif backend == "hdf5_lazy":
         return HDF5Session(store_path, session_id=session_id, mode="a", flush_every=100)
+    elif backend == "hdf5_packed":
+        return HDF5PackedSession(store_path, session_id=session_id, mode="a", flush_every=1)
+    elif backend == "hdf5_packed_lazy":
+        return HDF5PackedSession(store_path, session_id=session_id, mode="a", flush_every=100)
+    elif backend == "hdf5_compound":
+        return HDF5CompoundSession(store_path, session_id=session_id, mode="a", flush_every=1)
+    elif backend == "hdf5_compound_lazy":
+        return HDF5CompoundSession(store_path, session_id=session_id, mode="a", flush_every=100)
     elif backend == "sqlite":
         return SQLiteSession(store_path, session_id=session_id)
     elif backend == "json":
@@ -134,14 +162,17 @@ def build_backend(backend: str, store_path: Path, session_id: str):
 
 
 def clean_store(backend: str, store_path: Path) -> None:
-    if backend in ("hdf5", "hdf5_lazy", "sqlite") and store_path.exists():
+    if backend in ("hdf5", "hdf5_lazy", "hdf5_packed", "hdf5_packed_lazy",
+                   "hdf5_compound", "hdf5_compound_lazy", "sqlite") \
+            and store_path.exists():
         store_path.unlink()
     elif backend == "json" and store_path.exists():
         shutil.rmtree(store_path)
 
 
 def storage_bytes(backend: str, store_path: Path) -> int:
-    if backend in ("hdf5", "hdf5_lazy", "sqlite"):
+    if backend in ("hdf5", "hdf5_lazy", "hdf5_packed", "hdf5_packed_lazy",
+                   "hdf5_compound", "hdf5_compound_lazy", "sqlite"):
         return store_path.stat().st_size if store_path.exists() else 0
     elif backend == "json":
         if not store_path.exists():
@@ -173,7 +204,8 @@ def run_scenario(
             print(f"    n={n:>6,} ... ", end="", flush=True)
 
         # Unique path per (backend, scenario, n) to avoid contamination
-        if backend in ("hdf5", "hdf5_lazy"):
+        if backend in ("hdf5", "hdf5_lazy", "hdf5_packed", "hdf5_packed_lazy",
+                       "hdf5_compound", "hdf5_compound_lazy"):
             sp = store_root / f"sess_{backend}_{scenario}_{n}.h5"
         elif backend == "sqlite":
             sp = store_root / f"sess_{backend}_{scenario}_{n}.db"

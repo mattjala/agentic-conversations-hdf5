@@ -1,0 +1,215 @@
+{
+  "args": {
+    "backends": [
+      "sqlite_blob",
+      "hdf5",
+      "hdf5_packed",
+      "hdf5_compound",
+      "chroma"
+    ],
+    "sizes": [
+      1000,
+      10000,
+      100000
+    ],
+    "dims": [
+      384
+    ],
+    "quick": false,
+    "outdir": "results"
+  },
+  "results": [
+    {
+      "backend": "sqlite_blob",
+      "n": 1000,
+      "dim": 384,
+      "compression": "default",
+      "bytes": 2166784,
+      "bytes_per_doc": 2166.784
+    },
+    {
+      "backend": "sqlite_blob",
+      "n": 10000,
+      "dim": 384,
+      "compression": "default",
+      "bytes": 21557248,
+      "bytes_per_doc": 2155.7248
+    },
+    {
+      "backend": "sqlite_blob",
+      "n": 100000,
+      "dim": 384,
+      "compression": "default",
+      "bytes": 215846912,
+      "bytes_per_doc": 2158.46912
+    },
+    {
+      "backend": "hdf5",
+      "n": 1000,
+      "dim": 384,
+      "compression": "none",
+      "bytes": 1869624,
+      "bytes_per_doc": 1869.624
+    },
+    {
+      "backend": "hdf5",
+      "n": 1000,
+      "dim": 384,
+      "compression": "gzip1",
+      "bytes": 1807624,
+      "bytes_per_doc": 1807.624
+    },
+    {
+      "backend": "hdf5",
+      "n": 1000,
+      "dim": 384,
+      "compression": "gzip4",
+      "bytes": 1794701,
+      "bytes_per_doc": 1794.701
+    },
+    {
+      "backend": "hdf5",
+      "n": 1000,
+      "dim": 384,
+      "compression": "gzip9",
+      "bytes": 1778589,
+      "bytes_per_doc": 1778.589
+    },
+    {
+      "backend": "hdf5",
+      "n": 10000,
+      "dim": 384,
+      "compression": "none",
+      "bytes": 18339640,
+      "bytes_per_doc": 1833.964
+    },
+    {
+      "backend": "hdf5",
+      "n": 10000,
+      "dim": 384,
+      "compression": "gzip1",
+      "bytes": 16648476,
+      "bytes_per_doc": 1664.8476
+    },
+    {
+      "backend": "hdf5",
+      "n": 10000,
+      "dim": 384,
+      "compression": "gzip4",
+      "bytes": 16540770,
+      "bytes_per_doc": 1654.077
+    },
+    {
+      "backend": "hdf5",
+      "n": 10000,
+      "dim": 384,
+      "compression": "gzip9",
+      "bytes": 16412075,
+      "bytes_per_doc": 1641.2075
+    },
+    {
+      "backend": "hdf5",
+      "n": 100000,
+      "dim": 384,
+      "compression": "none",
+      "bytes": 179908264,
+      "bytes_per_doc": 1799.08264
+    },
+    {
+      "backend": "hdf5",
+      "n": 100000,
+      "dim": 384,
+      "compression": "gzip1",
+      "bytes": 156585243,
+      "bytes_per_doc": 1565.85243
+    },
+    {
+      "backend": "hdf5",
+      "n": 100000,
+      "dim": 384,
+      "compression": "gzip4",
+      "bytes": 155607817,
+      "bytes_per_doc": 1556.07817
+    },
+    {
+      "backend": "hdf5",
+      "n": 100000,
+      "dim": 384,
+      "compression": "gzip9",
+      "bytes": 153874238,
+      "bytes_per_doc": 1538.74238
+    },
+    {
+      "backend": "hdf5_packed",
+      "n": 1000,
+      "dim": 384,
+      "compression": "default",
+      "bytes": 1673277,
+      "bytes_per_doc": 1673.277
+    },
+    {
+      "backend": "hdf5_packed",
+      "n": 10000,
+      "dim": 384,
+      "compression": "default",
+      "bytes": 13314266,
+      "bytes_per_doc": 1331.4266
+    },
+    {
+      "backend": "hdf5_packed",
+      "n": 100000,
+      "dim": 384,
+      "compression": "default",
+      "bytes": 132518752,
+      "bytes_per_doc": 1325.18752
+    },
+    {
+      "backend": "hdf5_compound",
+      "n": 1000,
+      "dim": 384,
+      "compression": "default",
+      "bytes": 1668733,
+      "bytes_per_doc": 1668.733
+    },
+    {
+      "backend": "hdf5_compound",
+      "n": 10000,
+      "dim": 384,
+      "compression": "default",
+      "bytes": 14322561,
+      "bytes_per_doc": 1432.2561
+    },
+    {
+      "backend": "hdf5_compound",
+      "n": 100000,
+      "dim": 384,
+      "compression": "default",
+      "bytes": 140092412,
+      "bytes_per_doc": 1400.92412
+    },
+    {
+      "backend": "chroma",
+      "n": 1000,
+      "dim": 384,
+      "compression": "default",
+      "bytes": 3788964,
+      "bytes_per_doc": 3788.964
+    },
+    {
+      "backend": "chroma",
+      "n": 10000,
+      "dim": 384,
+      "compression": "default",
+      "bytes": 31219098,
+      "bytes_per_doc": 3121.9098
+    },
+    {
+      "backend": "chroma",
+      "n": 100000,
+      "dim": 384,
+      "compression": "default",
+      "bytes": 310983410,
+      "bytes_per_doc": 3109.8341
+    }
+  ]
+}

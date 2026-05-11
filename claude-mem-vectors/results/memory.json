@@ -1,0 +1,113 @@
+{
+  "args": {
+    "backends": [
+      "sqlite_blob",
+      "hdf5",
+      "hdf5_packed",
+      "hdf5_compound",
+      "chroma"
+    ],
+    "sizes": [
+      1000,
+      10000,
+      100000
+    ],
+    "dims": [
+      384
+    ],
+    "quick": false,
+    "outdir": "results"
+  },
+  "results": [
+    {
+      "backend": "sqlite_blob",
+      "n": 1000,
+      "dim": 384,
+      "peak_rss_bytes": 55287808
+    },
+    {
+      "backend": "sqlite_blob",
+      "n": 10000,
+      "dim": 384,
+      "peak_rss_bytes": 97841152
+    },
+    {
+      "backend": "sqlite_blob",
+      "n": 100000,
+      "dim": 384,
+      "peak_rss_bytes": 522616832
+    },
+    {
+      "backend": "hdf5",
+      "n": 1000,
+      "dim": 384,
+      "peak_rss_bytes": 58597376
+    },
+    {
+      "backend": "hdf5",
+      "n": 10000,
+      "dim": 384,
+      "peak_rss_bytes": 98508800
+    },
+    {
+      "backend": "hdf5",
+      "n": 100000,
+      "dim": 384,
+      "peak_rss_bytes": 459190272
+    },
+    {
+      "backend": "hdf5_packed",
+      "n": 1000,
+      "dim": 384,
+      "peak_rss_bytes": 59506688
+    },
+    {
+      "backend": "hdf5_packed",
+      "n": 10000,
+      "dim": 384,
+      "peak_rss_bytes": 98398208
+    },
+    {
+      "backend": "hdf5_packed",
+      "n": 100000,
+      "dim": 384,
+      "peak_rss_bytes": 498556928
+    },
+    {
+      "backend": "hdf5_compound",
+      "n": 1000,
+      "dim": 384,
+      "peak_rss_bytes": 59404288
+    },
+    {
+      "backend": "hdf5_compound",
+      "n": 10000,
+      "dim": 384,
+      "peak_rss_bytes": 96497664
+    },
+    {
+      "backend": "hdf5_compound",
+      "n": 100000,
+      "dim": 384,
+      "peak_rss_bytes": 475250688
+    },
+    {
+      "backend": "chroma",
+      "n": 1000,
+      "dim": 384,
+      "peak_rss_bytes": 137736192
+    },
+    {
+      "backend": "chroma",
+      "n": 10000,
+      "dim": 384,
+      "peak_rss_bytes": 165072896
+    },
+    {
+      "backend": "chroma",
+      "n": 100000,
+      "dim": 384,
+      "peak_rss_bytes": 414363648
+    }
+  ]
+}
