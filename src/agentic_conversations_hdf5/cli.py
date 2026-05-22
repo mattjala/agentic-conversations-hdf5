@@ -3,11 +3,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
 from .convert import convert_jsonl, convert_many
-from .backends.hdf5 import HDF5Session
+
+_HOOK_CMD = "python3 -m agentic_conversations_hdf5.hooks.live_session"
+_HOOK_EVENTS = ("UserPromptSubmit", "Stop")
 
 
 def _cmd_convert(args: argparse.Namespace) -> int:
@@ -67,18 +70,84 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_tail(args: argparse.Namespace) -> int:
-    sess = HDF5Session(args.path, session_id=args.session_id, mode="r")
-    try:
-        ctx = sess.get_recent_context(args.n)
-        for turn in ctx:
-            role = turn["role"] or turn.get("type", "")
-            content = (turn["content"] or "").replace("\n", " ")
-            if len(content) > 200:
-                content = content[:200] + "..."
-            print(f"[{role}] {content}")
-    finally:
-        sess.close()
+def _cmd_setup_hook(args: argparse.Namespace) -> int:
+    settings_path = Path("~/.claude/settings.json").expanduser()
+    output_dir = Path(args.output_dir).expanduser()
+
+    settings: dict = {}
+    if settings_path.exists():
+        with open(settings_path) as f:
+            settings = json.load(f)
+
+    hooks = settings.setdefault("hooks", {})
+    hook_entry = {"type": "command", "command": _HOOK_CMD}
+    if args.output_dir != "~/.claude/hdf5-sessions":
+        hook_entry["command"] = (
+            f"AGENTIC_HDF5_DIR={args.output_dir} {_HOOK_CMD}"
+        )
+
+    added = []
+    for event in _HOOK_EVENTS:
+        entries = hooks.setdefault(event, [])
+        cmds = [h.get("command", "") for e in entries for h in e.get("hooks", [])]
+        if not any("agentic_conversations_hdf5" in c for c in cmds):
+            entries.append({"hooks": [hook_entry]})
+            added.append(event)
+
+    with open(settings_path, "w") as f:
+        json.dump(settings, f, indent=2)
+        f.write("\n")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if added:
+        print(f"Hook registered for: {', '.join(added)}")
+    else:
+        print("Hook already registered (no changes made).")
+    print(f"HDF5 session files will be written to: {output_dir}")
+    print()
+    print("To inspect a live session:")
+    print("  agentic-conversations-hdf5 inspect <path-to-.h5>")
+    return 0
+
+
+def _cmd_teardown_hook(args: argparse.Namespace) -> int:
+    settings_path = Path("~/.claude/settings.json").expanduser()
+    if not settings_path.exists():
+        print("No settings.json found.")
+        return 0
+
+    with open(settings_path) as f:
+        settings = json.load(f)
+
+    hooks = settings.get("hooks", {})
+    removed = []
+    for event in _HOOK_EVENTS:
+        if event not in hooks:
+            continue
+        before = len(hooks[event])
+        hooks[event] = [
+            e for e in hooks[event]
+            if not any(
+                "agentic_conversations_hdf5" in h.get("command", "")
+                for h in e.get("hooks", [])
+            )
+        ]
+        if len(hooks[event]) < before:
+            removed.append(event)
+        if not hooks[event]:
+            del hooks[event]
+    if not hooks:
+        del settings["hooks"]
+
+    with open(settings_path, "w") as f:
+        json.dump(settings, f, indent=2)
+        f.write("\n")
+
+    if removed:
+        print(f"Hook removed from: {', '.join(removed)}")
+    else:
+        print("Hook not found (no changes made).")
     return 0
 
 
@@ -98,11 +167,22 @@ def main(argv: list[str] | None = None) -> int:
     p_ins.add_argument("path")
     p_ins.set_defaults(func=_cmd_inspect)
 
-    p_tail = sub.add_parser("tail", help="print the last N messages of a session")
-    p_tail.add_argument("path")
-    p_tail.add_argument("session_id")
-    p_tail.add_argument("-n", type=int, default=20)
-    p_tail.set_defaults(func=_cmd_tail)
+    p_setup = sub.add_parser(
+        "setup-hook",
+        help="register live-session hook in ~/.claude/settings.json",
+    )
+    p_setup.add_argument(
+        "--output-dir",
+        default="~/.claude/hdf5-sessions",
+        help="directory for HDF5 session files (default: ~/.claude/hdf5-sessions)",
+    )
+    p_setup.set_defaults(func=_cmd_setup_hook)
+
+    p_tear = sub.add_parser(
+        "teardown-hook",
+        help="remove live-session hook from ~/.claude/settings.json",
+    )
+    p_tear.set_defaults(func=_cmd_teardown_hook)
 
     args = p.parse_args(argv)
     return args.func(args)

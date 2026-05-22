@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentic-conversations-hdf5"
-version = "0.1.0"
+version = "1.0.0"
 description = "Store agent conversation logs (e.g. Claude Code JSONL) as HDF5 for cheaper context reconstruction, analytical queries, and self-contained provenance."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -14,11 +14,20 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-bench = ["matplotlib>=3.7"]
-dev = ["pytest>=7"]
+orc = ["pyarrow>=14"]
+bench = ["matplotlib>=3.7", "pyarrow>=14", "python-pptx>=0.6"]
+dev = ["pytest>=7", "pyarrow>=14"]
+
+[project.urls]
+Homepage = "https://github.com/mattjala/agentic-conversations-hdf5"
+Repository = "https://github.com/mattjala/agentic-conversations-hdf5"
 
 [project.scripts]
 agentic-conversations-hdf5 = "agentic_conversations_hdf5.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

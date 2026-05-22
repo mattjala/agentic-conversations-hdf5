@@ -1,0 +1,93 @@
+name: Release
+
+# Manual dispatch only. Pick "release" for a normal version cut, or
+# "pre-release" to publish an auto-numbered v{base}pre{N} from the current
+# base version in pyproject.toml. Uses PyPI Trusted Publishing (OIDC) —
+# see docs/releasing.md for the one-time setup.
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: "Release type"
+        required: true
+        type: choice
+        options:
+          - release
+          - pre-release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/agentic-conversations-hdf5/
+    permissions:
+      id-token: write   # required for OIDC trusted publishing
+      contents: write   # required for creating tags and releases
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # need full history for pre-release tag counting
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Get base version from pyproject.toml
+        id: base_version
+        run: echo "version=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")" >> "$GITHUB_OUTPUT"
+
+      - name: Compute release version
+        id: version
+        run: |
+          BASE="${{ steps.base_version.outputs.version }}"
+          if [ "${{ inputs.release_type }}" = "pre-release" ]; then
+            COUNT=$(git tag --list "v${BASE}pre*" | wc -l | tr -d ' ')
+            VERSION="${BASE}pre${COUNT}"
+          else
+            VERSION="${BASE}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: ${VERSION}"
+
+      - name: Set package version for build
+        run: |
+          python -c "
+          import re
+          with open('pyproject.toml', 'r') as f:
+              content = f.read()
+          content = re.sub(
+              r'version = \".*?\"',
+              'version = \"${{ steps.version.outputs.version }}\"',
+              content,
+              count=1
+          )
+          with open('pyproject.toml', 'w') as f:
+              f.write(content)
+          "
+
+      - name: Install build tools
+        run: pip install build
+
+      - name: Build package
+        run: python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: Create git tag
+        run: |
+          git tag "v${{ steps.version.outputs.version }}"
+          git push origin "v${{ steps.version.outputs.version }}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ steps.version.outputs.version }}"
+          name: "v${{ steps.version.outputs.version }}"
+          prerelease: ${{ inputs.release_type == 'pre-release' }}
+          generate_release_notes: true

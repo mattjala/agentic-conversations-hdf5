@@ -4,7 +4,7 @@
 
 This repo explores two ways to use HDF5 in agentic AI pipelines.
 
-The main body of the repo focuses on storing Claude Code session logs as HDF5 instead of JSONL. This shows improvement on recovering recent messages through hyperslab reads instead of full-file scans, and also supports faster aggregate information computation. Tool call data lives in the same file as any numerical artifacts the agent produced. Three HDF5 layout variants (VLEN, packed, compound) are implemented and tested.
+The main body of the repo focuses on storing Claude Code session logs as HDF5 instead of JSONL. This shows improvement on recovering recent messages through hyperslab reads instead of full-file scans, and also supports faster aggregate information computation. Tool call data lives in the same file as any numerical artifacts the agent produced.
 
 The subfolder `claude-mem-vectors` focuses on using HDF5 as a drop-in vector store backend for [claude-mem](https://github.com/badlogic/claude-mem), replacing ChromaDB. Three HDF5 layout variants (VLEN, packed, compound) are measured against SQLite+BLOB and in-memory baselines on the exact interface claude-mem's `ChromaSync` exercises.
 
@@ -20,7 +20,39 @@ pip install -e .
 pip install -e ".[bench]"
 ```
 
-### Converting a Claude Code session
+### Live session recording (hook)
+
+The easiest way to capture sessions is the live hook, which writes incrementally to HDF5 as Claude Code runs — no post-hoc conversion needed.
+
+```bash
+pip install -e .
+agentic-conversations-hdf5 setup-hook
+```
+
+That one command patches `~/.claude/settings.json` to register hooks on `UserPromptSubmit` and `Stop`. Sessions are written to `~/.claude/hdf5-sessions/<session-id>.h5` by default.
+
+```bash
+# Inspect a live session (while Claude Code is running or after):
+agentic-conversations-hdf5 inspect ~/.claude/hdf5-sessions/<session-id>.h5
+```
+
+To write files to a different directory:
+
+```bash
+agentic-conversations-hdf5 setup-hook --output-dir ~/my-sessions
+# or set the env var when the hook runs:
+export AGENTIC_HDF5_DIR=~/my-sessions
+```
+
+To remove the hook:
+
+```bash
+agentic-conversations-hdf5 teardown-hook
+```
+
+The hook never blocks Claude Code — all errors are swallowed silently so a broken HDF5 install cannot interrupt your session.
+
+### Converting a Claude Code session (post-hoc)
 
 ```bash
 agentic-conversations-hdf5 convert \
@@ -39,15 +71,11 @@ agentic-conversations-hdf5 convert \
     -o all-sessions.h5
 ```
 
-### Three layouts
+### Backends
 
-This repo contains three HDF5 backends and two comparison backends (SQLite, JSON+NumPy), all implementing the same `SessionBackend` interface.
+`HDF5Session` implements the `SessionBackend` interface; SQLite and JSON+NumPy backends implement the same interface for benchmark comparison.
 
-**VLEN** (`HDF5Session`) is the baseline HDF5 layout: one dataset per column, VLEN UTF-8 strings, gzip compression. VLEN strings live in HDF5's global heap and are incompressible regardless of dataset-level compression settings — so `content_text` and `content_json` compress less than you'd expect.
-
-**Packed** (`HDF5PackedSession`) stores unbounded string columns as flat `uint8` byte buffers with a separate offset index, so gzip can actually compress them. Fixed-width fields (role, type, model) become `S24`/`S48` byte-string datasets. The tradeoff is schema complexity and higher reconstruction cost per row.
-
-**Compound** (`HDF5CompoundSession`) stores all metadata for a message in a single compound dataset — one row per message, one read to load all columns. Write cost drops from 9 dataset writes to 2 per upsert. Fixed-length string fields are inline in the chunk and compressible; VLEN fields (uuid, content) are not.
+Identifier columns are VLEN UTF-8 strings; unbounded content (`content_text`, `content_json`, tool args/results) is packed into flat `uint8` byte buffers with a compound offset/length index, so gzip compresses it in full. Token usage is a standalone compound numeric dataset for one-read analytical queries. Embeddings, when present, are a single consolidated `(N, D)` dataset.
 
 ### Schema
 
@@ -55,10 +83,11 @@ Full schema is in [`docs/schema.md`](docs/schema.md). The short version:
 
 ```
 /sessions/<sid>/
-    messages/       — parallel 1-D datasets: uuid, parent_uuid, type, role,
-                      timestamp, content_text, content_json, model, usage
-                      usage is compound (input/output/cache_creation/cache_read tokens)
-    tool_calls/     — parallel 1-D datasets per tool invocation, joined by tool_use_id
+    messages/       — uuid, parent_uuid, type, role, model (VLEN str), timestamp,
+                      usage (compound), content_index + content_bytes (packed text),
+                      has_embedding, embeddings (N, D)
+    tool_calls/     — one row per tool invocation, joined by tool_use_id;
+                      args/result packed into call_index + call_bytes
     artifacts/      — arbitrary binary outputs (figures, arrays, etc.)
 ```
 

@@ -45,7 +45,9 @@ import matplotlib.ticker as mticker
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from agentic_conversations_hdf5 import HDF5Session, HDF5PackedSession, HDF5CompoundSession, JSONSession, SQLiteSession
+from agentic_conversations_hdf5 import (
+    HDF5Session, JSONSession, SQLiteSession, ORCSession,
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -95,33 +97,33 @@ def rand_artifact() -> np.ndarray:
 BACKENDS = {
     "hdf5": {
         "label": "HDF5 (flush=1)",
-        "color": "#1f77b4",
+        "color": "#9467bd",
         "marker": "o",
     },
     "hdf5_lazy": {
         "label": "HDF5 (flush=100)",
-        "color": "#17becf",
-        "marker": "s",
-    },
-    "hdf5_packed": {
-        "label": "HDF5-packed (flush=1)",
-        "color": "#9467bd",
-        "marker": "P",
-    },
-    "hdf5_packed_lazy": {
-        "label": "HDF5-packed (flush=100)",
         "color": "#c5b0d5",
         "marker": "X",
     },
-    "hdf5_compound": {
-        "label": "HDF5-compound (flush=1)",
-        "color": "#2ca02c",
-        "marker": "D",
+    "hdf5_core": {
+        "label": "HDF5 (Core VFD)",
+        "color": "#7f3fbf",
+        "marker": "*",
     },
-    "hdf5_compound_lazy": {
-        "label": "HDF5-compound (flush=100)",
-        "color": "#98df8a",
-        "marker": "d",
+    "hdf5_buf10": {
+        "label": "HDF5 (batch=10)",
+        "color": "#bcbddc",
+        "marker": "P",
+    },
+    "hdf5_buf25": {
+        "label": "HDF5 (batch=25)",
+        "color": "#9e9ac8",
+        "marker": "P",
+    },
+    "hdf5_buf100": {
+        "label": "HDF5 (batch=100)",
+        "color": "#756bb1",
+        "marker": "P",
     },
     "sqlite": {
         "label": "SQLite",
@@ -133,7 +135,24 @@ BACKENDS = {
         "color": "#2ca02c",
         "marker": "D",
     },
+    "orc_batch": {
+        "label": "ORC (batch)",
+        "color": "#8c564b",
+        "marker": "v",
+    },
+    "orc_rewrite": {
+        "label": "ORC (per-turn rewrite)",
+        "color": "#e377c2",
+        "marker": "<",
+    },
 }
+
+# Backends that store a directory tree rather than a single file.
+_DIR_BACKENDS = ("json", "orc_batch", "orc_rewrite")
+
+# Backends that write a single .h5 file (excludes Core VFD, whose mid-session
+# on-disk size is 0).
+_H5_FILE_BACKENDS = ("hdf5", "hdf5_lazy", "hdf5_buf10", "hdf5_buf25", "hdf5_buf100")
 
 SCENARIOS = ["text", "data"]
 SCENARIO_LABELS = {"text": "text-only", "data": "array-heavy"}
@@ -145,36 +164,42 @@ def build_backend(backend: str, store_path: Path, session_id: str):
         return HDF5Session(store_path, session_id=session_id, mode="a", flush_every=1)
     elif backend == "hdf5_lazy":
         return HDF5Session(store_path, session_id=session_id, mode="a", flush_every=100)
-    elif backend == "hdf5_packed":
-        return HDF5PackedSession(store_path, session_id=session_id, mode="a", flush_every=1)
-    elif backend == "hdf5_packed_lazy":
-        return HDF5PackedSession(store_path, session_id=session_id, mode="a", flush_every=100)
-    elif backend == "hdf5_compound":
-        return HDF5CompoundSession(store_path, session_id=session_id, mode="a", flush_every=1)
-    elif backend == "hdf5_compound_lazy":
-        return HDF5CompoundSession(store_path, session_id=session_id, mode="a", flush_every=100)
+    elif backend == "hdf5_core":
+        return HDF5Session(store_path, session_id=session_id, mode="a",
+                           flush_every=0, core_vfd=True)
+    elif backend == "hdf5_buf10":
+        return HDF5Session(store_path, session_id=session_id, mode="a",
+                           flush_every=10, batch_size=10)
+    elif backend == "hdf5_buf25":
+        return HDF5Session(store_path, session_id=session_id, mode="a",
+                           flush_every=25, batch_size=25)
+    elif backend == "hdf5_buf100":
+        return HDF5Session(store_path, session_id=session_id, mode="a",
+                           flush_every=100, batch_size=100)
     elif backend == "sqlite":
         return SQLiteSession(store_path, session_id=session_id)
     elif backend == "json":
         return JSONSession(store_path, session_id=session_id)
+    elif backend == "orc_batch":
+        return ORCSession(store_path, session_id=session_id, mode="batch")
+    elif backend == "orc_rewrite":
+        return ORCSession(store_path, session_id=session_id, mode="rewrite")
     else:
         raise ValueError(f"Unknown backend: {backend}")
 
 
 def clean_store(backend: str, store_path: Path) -> None:
-    if backend in ("hdf5", "hdf5_lazy", "hdf5_packed", "hdf5_packed_lazy",
-                   "hdf5_compound", "hdf5_compound_lazy", "sqlite") \
+    if backend in (*_H5_FILE_BACKENDS, "hdf5_core", "sqlite") \
             and store_path.exists():
         store_path.unlink()
-    elif backend == "json" and store_path.exists():
+    elif backend in _DIR_BACKENDS and store_path.exists():
         shutil.rmtree(store_path)
 
 
 def storage_bytes(backend: str, store_path: Path) -> int:
-    if backend in ("hdf5", "hdf5_lazy", "hdf5_packed", "hdf5_packed_lazy",
-                   "hdf5_compound", "hdf5_compound_lazy", "sqlite"):
+    if backend in (*_H5_FILE_BACKENDS, "sqlite"):
         return store_path.stat().st_size if store_path.exists() else 0
-    elif backend == "json":
+    elif backend in _DIR_BACKENDS:
         if not store_path.exists():
             return 0
         total = 0
@@ -204,12 +229,11 @@ def run_scenario(
             print(f"    n={n:>6,} ... ", end="", flush=True)
 
         # Unique path per (backend, scenario, n) to avoid contamination
-        if backend in ("hdf5", "hdf5_lazy", "hdf5_packed", "hdf5_packed_lazy",
-                       "hdf5_compound", "hdf5_compound_lazy"):
+        if backend in (*_H5_FILE_BACKENDS, "hdf5_core"):
             sp = store_root / f"sess_{backend}_{scenario}_{n}.h5"
         elif backend == "sqlite":
             sp = store_root / f"sess_{backend}_{scenario}_{n}.db"
-        else:  # json
+        else:  # json / orc (directory-based)
             sp = store_root / f"sess_{backend}_{scenario}_{n}"
 
         clean_store(backend, sp)

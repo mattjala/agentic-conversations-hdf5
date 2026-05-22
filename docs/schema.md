@@ -2,14 +2,10 @@
 
 This document covers two independent uses of HDF5 in this project:
 
-- **Session file schemas** — three alternative layouts for storing raw agent
-  conversation logs (messages, tool calls, artifacts).
+- **Session file schema** — storing raw agent conversation logs (messages,
+  tool calls, artifacts).
 - **Vector store schemas** — three alternative layouts for the embedding store
   that backs claude-mem memory.
-
-Each family has three variants that differ primarily in how variable-length
-string data is handled. All variants within a family expose the same interface
-and store the same logical data.
 
 ---
 
@@ -20,9 +16,7 @@ conversations. The layout favours append-mostly writes, range reads for
 context reconstruction, and columnar reads for analytical queries (token
 usage, tool-call statistics).
 
-## Shared structure (all three layouts)
-
-The group hierarchy and attribute conventions are identical across all layouts.
+## Group hierarchy
 
 ```
 /                                     attrs: schema_version (int = 1)
@@ -30,148 +24,59 @@ The group hierarchy and attribute conventions are identical across all layouts.
 /sessions/
 /sessions/<session_id>/               attrs: model, created_at, summary, cwd,
                                              git_branch, agent_version,
-                                             permission_mode,
-                                             session_id_original
+                                             permission_mode, session_id_original
 /sessions/<sid>/messages/             dataset group — one row per message
-/sessions/<sid>/messages/embeddings/  optional — one float32 (D,) dataset per
-                                       message uuid, only when embedding given
 /sessions/<sid>/tool_calls/           dataset group — one row per tool call
 /sessions/<sid>/tool_calls/result_data/  optional — one typed array dataset per
                                           tool_use_id, for array-valued results
 /sessions/<sid>/artifacts/            free-form — one named dataset per artifact
 ```
 
-Within each dataset group, all datasets share the same length, use
-`maxshape=(None,)` (extendable), and `chunks=(64,)`. Numeric datasets add the
-shuffle filter; the three layouts differ in how string-valued columns are
-stored.
+Per-row datasets share the same length and use `maxshape=(None,)` (extendable;
+capacity is pre-allocated and doubled on growth, then truncated on close).
+Numeric and byte datasets are chunked (`chunks=(64,)` for rows) with shuffle +
+gzip; identifier columns are VLEN UTF-8 strings.
 
-## Messages columns
+## Messages
 
-| Column         | Type (see layouts below) | Description                              |
-|----------------|--------------------------|------------------------------------------|
-| `uuid`         | str                      | Stable message id from the source log    |
-| `parent_uuid`  | str                      | Parent message uuid; forms a DAG         |
-| `type`         | str                      | "user", "assistant", "summary", …        |
-| `role`         | str                      | API-level role inside the message block  |
-| `timestamp`    | float64                  | Unix seconds (UTC)                       |
-| `content_text` | str                      | Best-effort plain-text view of content   |
-| `content_json` | str                      | Full content blocks JSON (lossless)      |
-| `model`        | str                      | Per-message model id (assistant rows)    |
-| `usage`        | compound (4 × int64)     | input / output / cache_creation / cache_read tokens |
-
-## Tool-call columns
-
-| Column         | Type (see layouts below) | Description                              |
-|----------------|--------------------------|------------------------------------------|
-| `tool_use_id`  | str                      | Anthropic `toolu_…` id                   |
-| `message_uuid` | str                      | UUID of the assistant message that issued the call |
-| `name`         | str                      | Tool name (e.g. "Read", "Bash")          |
-| `args_json`    | str                      | Tool input as JSON                       |
-| `result_text`  | str                      | Plain-text view of the result            |
-| `result_uuid`  | str                      | UUID of the user message carrying the result |
-| `timestamp`    | float64                  | Unix seconds                             |
-| `is_error`     | uint8                    | 1 if the tool reported an error          |
-
----
-
-## Layout 1: VLEN parallel arrays (schema.py)
-
-Every string column is a separate 1-D dataset using HDF5's variable-length
-UTF-8 string dtype. Each column is its own chunked dataset; `usage` is a
-compound numeric dataset.
+Variable-length content is packed into a flat `uint8` byte buffer with a
+compound offset/length index, so gzip compresses it in full.
 
 ```
 messages/
     uuid, parent_uuid, type, role, model   VLEN str  (N,)
     timestamp                              float64   (N,)
-    content_text, content_json             VLEN str  (N,)
-    usage                                  compound  (N,)
+    usage                                  compound  (N,)   input/output/cache_creation/cache_read (i8)
+    content_index                          compound  (N,)   text_off u8, text_len u4, json_off u8, json_len u4
+    content_bytes                          uint8     (B,)   all message content bytes
+    has_embedding                          uint8     (N,)   1 if this row carries an embedding
+    embeddings                             float32   (N, D) optional; created on the first embedding
+```
 
+To read `content_text` for row `i`: load `content_index[i]`, then slice
+`content_bytes[text_off : text_off + text_len]` and decode UTF-8. Embeddings,
+when present, are one consolidated `(N, D)` dataset row-aligned with the messages
+(zero-filled for rows without one), so a range of embeddings is a single slice
+read; `has_embedding` says which rows are real.
+
+## Tool calls
+
+Tool args and result text are packed into a second byte buffer, mirroring the
+message content layout.
+
+```
 tool_calls/
-    tool_use_id, message_uuid, name,
-    result_uuid, args_json, result_text    VLEN str  (M,)
-    timestamp                              float64   (M,)
-    is_error                               uint8     (M,)
+    tool_use_id, message_uuid, name, result_uuid   VLEN str  (M,)
+    timestamp                                       float64   (M,)
+    is_error                                        uint8     (M,)
+    call_index                                      compound  (M,)   args_off u8, args_len u4, result_off u8, result_len u4
+    call_bytes                                      uint8     (C,)   all tool args/result bytes
 ```
 
-**Trade-offs:** Simplest layout. VLEN strings are stored in HDF5's global
-heap, which the gzip filter does not touch — content fields are uncompressed.
-Reading a single column (e.g. `usage` for token accounting) loads only that
-dataset; analytical column access is efficient. An append touches one dataset
-per column.
-
----
-
-## Layout 2: Packed byte buffer (schema_packed.py)
-
-Identifier string columns (`uuid`, `type`, `role`, `model`, etc.) remain VLEN.
-The large unbounded content columns — `content_text` and `content_json` in
-messages, `args_json` and `result_text` in tool calls — are replaced with flat
-`uint8` byte buffers plus compound offset/length index datasets.
-
-```
-messages/
-    uuid, parent_uuid, type, role, model   VLEN str  (N,)   [unchanged]
-    timestamp                              float64   (N,)   [unchanged]
-    usage                                  compound  (N,)   [unchanged]
-    content_index                          compound  (N,)   (text_off u8, text_len u4,
-                                                             json_off u8, json_len u4)
-    content_bytes                          uint8     (B,)   all content bytes concatenated
-
-tool_calls/
-    tool_use_id, message_uuid, name,
-    result_uuid                            VLEN str  (M,)   [unchanged]
-    timestamp                              float64   (M,)   [unchanged]
-    is_error                               uint8     (M,)   [unchanged]
-    call_index                             compound  (M,)   (args_off u8, args_len u4,
-                                                             result_off u8, result_len u4)
-    call_bytes                             uint8     (C,)   all call bytes concatenated
-```
-
-To read `content_text` for message at row `i`: load `content_index[i]`, then
-slice `content_bytes[text_off : text_off + text_len]` and decode as UTF-8.
-New content is appended to the byte buffer; old bytes for overwritten rows
-become dead space (acceptable for append-mostly logs).
-
-**Trade-offs:** The byte buffer is a regular chunked dataset, so gzip
-compresses the content columns. Identifier columns remain VLEN and uncompressed.
-Read path for content requires two dataset accesses instead of one.
-
----
-
-## Layout 3: Compound dataset (schema_compound.py)
-
-Each group is a single compound dataset — one row per record — rather than
-parallel 1-D arrays. String fields are split by boundedness:
-
-- **Bounded identifiers** (`uuid`, `type`, `role`, `model`, tool names) use
-  fixed-length byte-string types (`S40`, `S16`, etc.). These are stored inline
-  in the chunk data and are compressible.
-- **Unbounded content** (`content_text`, `content_json`, `args_json`,
-  `result_text`) use VLEN UTF-8 strings. These still go to the HDF5 global heap
-  and are not compressed by gzip.
-
-```
-messages/   compound (N,)  fields: uuid S40, parent_uuid S40, type S16,
-                                    role S12, model S64, timestamp f8,
-                                    content_text VLEN, content_json VLEN,
-                                    input_tokens i8, output_tokens i8,
-                                    cache_creation_input_tokens i8,
-                                    cache_read_input_tokens i8
-
-tool_calls/ compound (M,)  fields: tool_use_id S40, message_uuid S40,
-                                    name S64, timestamp f8, is_error u1,
-                                    args_json VLEN, result_text VLEN,
-                                    result_uuid S40
-```
-
-**Trade-offs:** Row access (e.g. reading the last N messages for context) is
-one compound slice instead of N separate dataset reads — compound wins here.
-Column access (e.g. summing token usage) reads all chunk bytes and discards
-non-selected fields, so the parallel layouts are faster for purely analytical
-queries. File size is roughly equal to the VLEN layout since content fields
-are still uncompressed.
+Token usage is stored as a standalone compound numeric dataset so analytical
+queries (total tokens, cache hit rate) are a single hyperslab read with no JSON
+parsing. `parent_uuid` is preserved verbatim, so forks in the source log survive
+the round-trip.
 
 ---
 

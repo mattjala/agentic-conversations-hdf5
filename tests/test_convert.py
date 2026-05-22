@@ -71,22 +71,24 @@ def test_token_usage_aggregation(tmp_path):
     assert totals["cache_read_input_tokens"] == 500 + 600
 
 
+def _dec(v):
+    return v.decode() if isinstance(v, (bytes, bytearray)) else v
+
+
 def test_tool_use_joins_to_result(tmp_path):
     out = tmp_path / "session.h5"
     convert_jsonl(FIXTURE, out, overwrite=True)
 
     with h5py.File(out, "r") as f:
         tg = f["sessions/sample/tool_calls"]
-        tu_id = tg["tool_use_id"][0]
-        if isinstance(tu_id, bytes):
-            tu_id = tu_id.decode()
-        result = tg["result_text"][0]
-        if isinstance(result, bytes):
-            result = result.decode()
-        name = tg["name"][0]
-        if isinstance(name, bytes):
-            name = name.decode()
+        tu_id = _dec(tg["tool_use_id"][0])
+        name = _dec(tg["name"][0])
         is_err = int(tg["is_error"][0])
+        ci = tg["call_index"][0]
+        call_bytes = bytes(tg["call_bytes"][:])
+        result = call_bytes[
+            int(ci["result_off"]):int(ci["result_off"]) + int(ci["result_len"])
+        ].decode()
 
     assert tu_id == "toolu_aaa"
     assert name == "Bash"
@@ -119,9 +121,12 @@ def test_content_json_roundtrip(tmp_path):
     convert_jsonl(FIXTURE, out, overwrite=True)
 
     with h5py.File(out, "r") as f:
-        cj = f["sessions/sample/messages/content_json"][1]
-        if isinstance(cj, bytes):
-            cj = cj.decode()
+        mg = f["sessions/sample/messages"]
+        ci = mg["content_index"][1]
+        content_bytes = bytes(mg["content_bytes"][:])
+        cj = content_bytes[
+            int(ci["json_off"]):int(ci["json_off"]) + int(ci["json_len"])
+        ].decode()
     blocks = json.loads(cj)
     types = [b.get("type") for b in blocks]
     assert "text" in types

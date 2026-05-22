@@ -276,3 +276,75 @@ def convert_many(
         p = Path(p)
         out[p.name] = convert_jsonl(p, h5_path, session_id=p.stem)
     return out
+
+
+def unpack_to_jsonl(
+    h5_path: str | Path,
+    out_path: str | Path,
+    session_id: Optional[str] = None,
+    overwrite: bool = False,
+) -> int:
+    """Reconstruct approximate JSONL from an HDF5 session file.
+
+    Best-effort round-trip for inspection/verification. Fields that were not
+    stored (e.g. original sessionId, gitBranch) are omitted; content blocks are
+    rebuilt from content_json. Returns the number of message lines written.
+    """
+    import h5py
+
+    h5_path = Path(h5_path)
+    out_path = Path(out_path)
+    if out_path.exists() and not overwrite:
+        raise FileExistsError(f"{out_path} already exists; pass overwrite=True")
+
+    with h5py.File(h5_path, "r") as f:
+        sessions = list(f.get("sessions", {}).keys())
+        if not sessions:
+            raise ValueError(f"No sessions found in {h5_path}")
+        sid = session_id or sessions[0]
+        if sid not in f["sessions"]:
+            raise ValueError(f"Session {sid!r} not found; available: {sessions}")
+
+        mg = f[f"sessions/{sid}/messages"]
+        n_msg = mg["uuid"].shape[0]
+        uuids = mg["uuid"][:]
+        parents = mg["parent_uuid"][:]
+        types = mg["type"][:]
+        roles = mg["role"][:]
+        models = mg["model"][:]
+        timestamps = mg["timestamp"][:]
+        usages = mg["usage"][:]
+        idx = mg["content_index"][:]
+        all_content = bytes(mg["content_bytes"][:]) if mg["content_bytes"].shape[0] else b""
+
+    def _s(v: Any) -> str:
+        return v.decode("utf-8", errors="replace") if isinstance(v, (bytes, bytearray)) else str(v)
+
+    def _slice(buf: bytes, off: int, length: int) -> str:
+        return buf[off:off + length].decode("utf-8", errors="replace")
+
+    lines = 0
+    with open(out_path, "w", encoding="utf-8") as out:
+        for i in range(n_msg):
+            row = idx[i]
+            content_json_str = _slice(all_content, int(row["json_off"]), int(row["json_len"]))
+            try:
+                content = json.loads(content_json_str) if content_json_str else None
+            except json.JSONDecodeError:
+                content = content_json_str or None
+            u = usages[i]
+            record: dict[str, Any] = {
+                "type": _s(types[i]),
+                "uuid": _s(uuids[i]),
+                "parentUuid": _s(parents[i]) or None,
+                "timestamp": float(timestamps[i]),
+                "message": {
+                    "role": _s(roles[i]),
+                    "model": _s(models[i]),
+                    "content": content,
+                    "usage": {k: int(u[k]) for k in u.dtype.names},
+                },
+            }
+            out.write(json.dumps(record) + "\n")
+            lines += 1
+    return lines
