@@ -92,3 +92,6 @@ jobs:
           name: "v${{ steps.version.outputs.version }}"
           prerelease: ${{ inputs.release_type == 'pre-release' }}
           generate_release_notes: true
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
