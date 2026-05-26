@@ -2,8 +2,12 @@ name: Release
 
 # Manual dispatch only. Pick "release" for a normal version cut, or
 # "pre-release" to publish an auto-numbered v{base}pre{N} from the current
-# base version in pyproject.toml. Uses PyPI Trusted Publishing (OIDC) —
-# see docs/releasing.md for the one-time setup.
+# base version in pyproject.toml. PyPI uploads happen only on "release" via
+# Trusted Publishing (OIDC). See docs/releasing.md for the one-time setup.
+#
+# Two-job split is deliberate: the `publish` job carries `environment: pypi`,
+# so a "pypi" deployment record is only created when we actually push to PyPI.
+# Pre-release runs skip the publish job entirely → no misleading deployment.
 
 on:
   workflow_dispatch:
@@ -17,15 +21,12 @@ on:
           - pre-release
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
-    environment:
-      name: pypi
-      url: https://pypi.org/project/agentic-conversations-hdf5/
     permissions:
-      id-token: write   # required for OIDC trusted publishing
-      contents: write   # required for creating tags and releases
-
+      contents: write   # create tags and GitHub releases
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -76,9 +77,11 @@ jobs:
       - name: Build package
         run: python -m build
 
-      - name: Publish to PyPI
-        if: inputs.release_type == 'release'
-        uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Upload dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
 
       - name: Create git tag
         run: |
@@ -95,3 +98,22 @@ jobs:
           files: |
             dist/*.whl
             dist/*.tar.gz
+
+  publish:
+    needs: build
+    if: inputs.release_type == 'release'
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/agentic-conversations-hdf5/
+    permissions:
+      id-token: write   # required for OIDC trusted publishing
+    steps:
+      - name: Download dist artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
