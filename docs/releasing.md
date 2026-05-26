@@ -30,11 +30,14 @@ and commit *before* dispatching the workflow.
    - **pre-release** — auto-numbers as `v{base}pre{N}`, where `N` is the count
      of existing `v{base}pre*` tags (so the first pre-release for `0.2.0` is
      `v0.2.0pre0`, the next is `v0.2.0pre1`, and so on). Marked as a
-     pre-release on GitHub.
+     pre-release on GitHub. **Pre-releases skip PyPI** — they only produce a
+     git tag, a GitHub Release with the built sdist/wheel attached, and can be
+     installed directly from git
+     (`pip install git+https://github.com/mattjala/agentic-conversations-hdf5@v0.2.0pre0`).
 
 The workflow rewrites `pyproject.toml` in-flight with the resolved version,
-builds the sdist + wheel, publishes to PyPI, creates the git tag, and creates
-the GitHub Release with auto-generated notes.
+builds the sdist + wheel, publishes to PyPI (release only), creates the git
+tag, and creates the GitHub Release with auto-generated notes.
 
 ## Verify a build locally before dispatching
 
